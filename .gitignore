@@ -1,7 +1,74 @@
-src/
-out/
-shim/*.o
-dist/
-*.tar.gz
-installer/stage/
-*.pkg
+# Downloaded upstream trees/archives and build/package outputs (build.sh, pkgbuild).
+/src/
+/out/
+/out-macos*/
+/dist/
+/installer/stage/
+/*.tar.gz
+/*.pkg
+*.o
+*.app/
+*.dSYM/
+
+# MacPorts shim libraries are inherited, tracked build dependencies: keep them.
+# Ignore rules do not remove tracked Snow Leopard binaries or rewrite history.
+
+# macOS metadata.
+.DS_Store
+._*
+
+# Optional manual compiler/test outputs. Keep harness source and fixtures visible;
+# place disposable harnesses/results in .local-tests/ or test/.artifacts/.
+/TailscaleMenu
+/gui/TailscaleMenu
+/test/smoke
+/test/tsmoke
+/tsmoke
+/.local-tests/
+/test/.artifacts/
+/tests/.artifacts/
+/build/
+
+# Python test/development caches.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# Local environment/deployment configuration; examples remain publishable.
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+/deploy/local.env
+
+# Local runtime data and credentials; never ignore all PEM/JSON/plist assets.
+/secrets/
+/credentials/
+/credentials.json
+/.aws/
+/.ssh/
+/id_rsa
+/id_ed25519
+/authkey
+/authkey.txt
+/tailscale-authkey
+/tailscale-authkey.txt
+tailscaled.state
+tailscaled.state.*
+tailscaled.socket
+
+# Local diagnostic output (not fixture logs in source directories).
+/*.log
+/logs/
+/diagnostics/
+
+# Editor-local settings and temporary save files.
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
