@@ -80,3 +80,16 @@ using the audit recipe in the notes.
 
 Not affiliated with Tailscale. Patches here are for personal/legacy-hardware
 use; the modified binaries are unsupported upstream.
+
+## Verified macOS 11 Big Sur compatibility
+
+Tested on an Intel x86_64 MacBook Pro running **macOS 11.7.11**, with
+**Tailscale 1.102.4 / Go 1.26.6**. Native utun networking, authentication,
+tailnet connectivity, launchd daemon startup, and the hardened menu-bar GUI
+with automatic startup at login work. MagicDNS resolution and hostname-based
+macOS Screen Sharing also work after resolver registration. These functions
+remained operational after a reboot.
+
+This is a verified configuration of this repository's legacy build, not a claim
+of official Tailscale support. MagicDNS behavior may depend on macOS resolver
+registration; check `scutil --dns` if tailnet names do not resolve.
