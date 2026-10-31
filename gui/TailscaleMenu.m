@@ -31,10 +31,12 @@
     NSString *kind;
     NSDictionary *result;
     NSDictionary *statusResult;
+    NSDictionary *versionResult;
+    BOOL fetchVersion;
 @private
     BOOL cancellationRequested;
 }
-- (id)initWithController:(id)c kind:(NSString *)k;
+- (id)initWithController:(id)c kind:(NSString *)k fetchVersion:(BOOL)v;
 - (void)requestCancellation;
 - (BOOL)cancellationRequested;
 - (void)detachController;
@@ -53,6 +55,9 @@ static NSString *kSocket = @"/var/run/tailscaled.socket";
     BOOL cleanupFailed;
     NSMutableArray *peerLines;   // parsed "ip name owner os" rows
     NSString *selfLine;          // first row: this machine
+    NSString *selfIP;            // first row: local Tailscale IPv4
+    NSString *clientVersion;     // fetched once from the installed CLI
+    BOOL versionRequested;
     NSString *notice;            // "Logged out." / auth URL / error
     NSString *loginURL;
 }
@@ -189,22 +194,26 @@ static NSDictionary *RunTS(NSArray *args, TSCommand *operation, double timeout) 
 }
 
 @implementation TSCommand
-- (id)initWithController:(id)c kind:(NSString *)k {
-    if ((self = [super init])) { controller = [c retain]; kind = [k copy]; }
+- (id)initWithController:(id)c kind:(NSString *)k fetchVersion:(BOOL)v {
+    if ((self = [super init])) { controller = [c retain]; kind = [k copy]; fetchVersion = v; }
     return self;
 }
 - (void)requestCancellation { @synchronized(self) { cancellationRequested = YES; } }
 - (BOOL)cancellationRequested { @synchronized(self) { return cancellationRequested; } }
 - (void)detachController { [controller release]; controller = nil; }
 - (void)dealloc {
-    [controller release]; [kind release]; [result release]; [statusResult release];
+    [controller release]; [kind release]; [result release]; [statusResult release]; [versionResult release];
     [super dealloc];
 }
 - (void)main {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     NSArray *args = [kind isEqual:@"up"] ? [NSArray arrayWithObjects:@"up", @"--timeout=8s", nil]
+                  : [kind isEqual:@"ip"] ? [NSArray arrayWithObjects:@"ip", @"-4", nil]
                                            : [NSArray arrayWithObject:kind];
     result = [RunTS(args, self, ([kind isEqual:@"up"] || [kind isEqual:@"down"]) ? 10.0 : 5.0) retain];
+    if ([kind isEqual:@"status"] && fetchVersion && ![result objectForKey:@"error"] &&
+        ![self cancellationRequested] && ![result objectForKey:@"cleanupError"])
+        versionResult = [RunTS([NSArray arrayWithObject:@"version"], self, 5.0) retain];
     if (([kind isEqual:@"up"] || [kind isEqual:@"down"]) &&
         ![self cancellationRequested] && ![result objectForKey:@"cleanupError"])
         statusResult = [RunTS([NSArray arrayWithObject:@"status"], self, 5.0) retain];
@@ -242,6 +251,57 @@ static NSArray *SplitFields(NSString *row) {
     return out;
 }
 
+static NSString *VersionLine(NSString *output) {
+    NSString *first = [[output componentsSeparatedByString:@"\n"] objectAtIndex:0];
+    first = [first stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (![first length]) return nil;
+    NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"0123456789."];
+    return [first rangeOfCharacterFromSet:[allowed invertedSet]].location == NSNotFound ? first : nil;
+}
+
+// Parse the same CLI status used by the menu without creating AppKit objects.
+static NSDictionary *ParseStatus(NSDictionary *result) {
+    NSString *out = [result objectForKey:@"output"];
+    NSMutableDictionary *parsed = [NSMutableDictionary dictionary];
+    NSMutableArray *peers = [NSMutableArray array];
+    [parsed setObject:peers forKey:@"peers"];
+    if ([result objectForKey:@"error"]) {
+        NSString *url = FindLoginURL(out);
+        [parsed setObject:url ? @"Needs login" : [result objectForKey:@"error"] forKey:@"notice"];
+        if (url) [parsed setObject:url forKey:@"loginURL"];
+    } else if ([out hasPrefix:@"Logged out"]) {
+        [parsed setObject:@"Logged out" forKey:@"notice"];
+        NSString *url = FindLoginURL(out);
+        if (url) [parsed setObject:url forKey:@"loginURL"];
+    } else if ([out hasPrefix:@"Tailscale is stopped"]) {
+        [parsed setObject:@"Disconnected" forKey:@"notice"];
+    } else if ([out hasPrefix:@"Tailscale is starting"] || [out hasPrefix:@"Connecting"]) {
+        [parsed setObject:@"Connecting…" forKey:@"notice"];
+    } else {
+        NSUInteger i = 0;
+        for (NSString *row in [out componentsSeparatedByString:@"\n"]) {
+            if (![row length]) continue;
+            NSArray *f = SplitFields(row);
+            if ([f count] >= 4 && [(NSString *)[f objectAtIndex:0] hasPrefix:@"100."]) {
+                if (i == 0) {
+                    [parsed setObject:[f objectAtIndex:1] forKey:@"selfLine"];
+                    [parsed setObject:[f objectAtIndex:0] forKey:@"selfIP"];
+                } else [peers addObject:row];
+                i++;
+            } else if (i == 0 && [row rangeOfString:@"https://"].location != NSNotFound) {
+                NSString *url = FindLoginURL(row);
+                if (url) {
+                    [parsed setObject:@"Needs login" forKey:@"notice"];
+                    [parsed setObject:url forKey:@"loginURL"];
+                }
+            }
+        }
+        if (![parsed objectForKey:@"selfLine"] && ![parsed objectForKey:@"notice"])
+            [parsed setObject:@"Tailscale status unavailable" forKey:@"notice"];
+    }
+    return parsed;
+}
+
 @implementation AppController
 
 - (id)init {
@@ -271,7 +331,7 @@ static NSArray *SplitFields(NSString *row) {
                                                     selector:@selector(fire:)
                                                     userInfo:nil repeats:YES] retain];
         }
-        [self pollStatus:nil];
+        if (ui) [self pollStatus:nil];
     }
     return self;
 }
@@ -294,6 +354,8 @@ static NSArray *SplitFields(NSString *row) {
     [menu release];
     [peerLines release];
     [selfLine release];
+    [selfIP release];
+    [clientVersion release];
     [notice release];
     [loginURL release];
     [super dealloc];
@@ -302,7 +364,8 @@ static NSArray *SplitFields(NSString *row) {
 - (void)startCommand:(NSString *)kind {
     NSAssert([NSThread isMainThread], @"Commands must be admitted on the main thread");
     if (stopping || cleanupFailed || activeCommand) return;
-    activeCommand = [[TSCommand alloc] initWithController:self kind:kind];
+    BOOL getVersion = [kind isEqual:@"status"] && !versionRequested;
+    activeCommand = [[TSCommand alloc] initWithController:self kind:kind fetchVersion:getVersion];
     [commands addOperation:activeCommand];
     [self updateCommandAvailability];
 }
@@ -321,6 +384,7 @@ static NSArray *SplitFields(NSString *row) {
             cleanupFailed = YES;
             [notice release]; notice = [@"Child process cleanup failed; restart the menu app" retain];
             [selfLine release]; selfLine = nil;
+            [selfIP release]; selfIP = nil;
             [loginURL release]; loginURL = nil;
             [peerLines removeAllObjects];
         } else if ([kind isEqual:@"ip"]) {
@@ -334,6 +398,13 @@ static NSArray *SplitFields(NSString *row) {
                 }
             }
         } else {
+            if (command->versionResult) {
+                versionRequested = YES;
+                if (![command->versionResult objectForKey:@"error"]) {
+                    NSString *v = VersionLine([command->versionResult objectForKey:@"output"]);
+                    if (v) { [clientVersion release]; clientVersion = [v copy]; }
+                }
+            }
             [self applyStatus:command->statusResult ? command->statusResult : r];
             NSString *url = FindLoginURL([r objectForKey:@"output"]);
             if ([kind isEqual:@"up"] && url && !selfLine) {
@@ -362,41 +433,19 @@ static NSArray *SplitFields(NSString *row) {
 
 - (void)applyStatus:(NSDictionary *)result {
     NSAssert([NSThread isMainThread], @"Status state belongs to the main thread");
-    NSString *out = [result objectForKey:@"output"];
     NSString *previousURL = [[loginURL retain] autorelease];
+    NSDictionary *parsed = ParseStatus(result);
     [peerLines removeAllObjects];
     [selfLine release]; selfLine = nil;
+    [selfIP release]; selfIP = nil;
     [notice release]; notice = nil;
     [loginURL release]; loginURL = nil;
-
-    if ([result objectForKey:@"error"]) {
-        notice = [[result objectForKey:@"error"] copy];
-        loginURL = [FindLoginURL(out) copy];
-        if (loginURL) { [notice release]; notice = [@"Needs login" retain]; }
-    } else if ([out hasPrefix:@"Logged out"]) {
-        notice = [@"Logged out" retain];
-        loginURL = [FindLoginURL(out) retain];
-    } else {
-        NSArray *rows = [out componentsSeparatedByString:@"\n"];
-        NSUInteger i = 0;
-        for (NSString *row in rows) {
-            if ([row length] == 0) continue;
-            NSArray *f = SplitFields(row);
-            // "100.x.y.z  name  owner@  os  ..."  (tab or space separated)
-            if ([f count] >= 4 && [(NSString *)[f objectAtIndex:0] hasPrefix:@"100."]) {
-                if (i == 0) selfLine = [[f objectAtIndex:1] copy];
-                else [peerLines addObject:row];
-                i++;
-            } else if (i == 0 && [row rangeOfString:@"https://"].location != NSNotFound) {
-                [notice release];
-                notice = [@"Needs login" retain];
-                [loginURL release];
-                loginURL = [FindLoginURL(row) retain];
-            }
-        }
-        if (!selfLine && !notice) notice = [@"Tailscale status unavailable" retain];
-    }
-    if (!selfLine && !loginURL && [out hasPrefix:@"Logged out"])
+    [peerLines addObjectsFromArray:[parsed objectForKey:@"peers"]];
+    selfLine = [[parsed objectForKey:@"selfLine"] copy];
+    selfIP = [[parsed objectForKey:@"selfIP"] copy];
+    notice = [[parsed objectForKey:@"notice"] copy];
+    loginURL = [[parsed objectForKey:@"loginURL"] copy];
+    if (!selfLine && !loginURL && [[result objectForKey:@"output"] hasPrefix:@"Logged out"])
         loginURL = [previousURL copy];
     [self refreshIcon];
 }
@@ -418,23 +467,21 @@ static NSArray *SplitFields(NSString *row) {
     [menu removeAllItems];
     NSMenuItem *it;
 
-    if (notice) {
-        it = [[NSMenuItem alloc] initWithTitle:notice action:nil keyEquivalent:@""];
-        [it setEnabled:NO];
-        [menu addItem:[it autorelease]];
-        if (loginURL) {
-            it = [[NSMenuItem alloc] initWithTitle:@"Authenticate in Browser…"
-                                            action:@selector(openLogin:)
-                                     keyEquivalent:@""];
-            [it setTarget:self];
-            [menu addItem:[it autorelease]];
-        }
-    } else if (selfLine) {
-        NSString *ip = [selfLine stringByAppendingString:@" — connected"];
-        it = [[NSMenuItem alloc] initWithTitle:ip action:nil keyEquivalent:@""];
-        [it setEnabled:NO];
-        [menu addItem:[it autorelease]];
+    NSString *device = [NSString stringWithFormat:@"This device: %@", selfLine ? selfLine : @"Unavailable"];
+    it = [[NSMenuItem alloc] initWithTitle:device action:nil keyEquivalent:@""];
+    [it setEnabled:NO]; [menu addItem:[it autorelease]];
+    it = [[NSMenuItem alloc] initWithTitle:selfIP ? selfIP : @"IP unavailable" action:nil keyEquivalent:@""];
+    [it setEnabled:NO]; [menu addItem:[it autorelease]];
+    NSString *state = notice ? notice :
+        (clientVersion ? [NSString stringWithFormat:@"Connected · Tailscale %@", clientVersion] : @"Connected · Tailscale");
+    it = [[NSMenuItem alloc] initWithTitle:state action:nil keyEquivalent:@""];
+    [it setEnabled:NO]; [menu addItem:[it autorelease]];
+    if (loginURL) {
+        it = [[NSMenuItem alloc] initWithTitle:@"Authenticate in Browser…"
+                                        action:@selector(openLogin:) keyEquivalent:@""];
+        [it setTarget:self]; [menu addItem:[it autorelease]];
     }
+    [menu addItem:[NSMenuItem separatorItem]];
 
     it = [[NSMenuItem alloc] initWithTitle:selfLine ? @"Disconnect" : @"Connect…"
                                     action:@selector(toggle:)
@@ -525,25 +572,22 @@ static NSArray *SplitFields(NSString *row) {
 @end
 
 static void SelfTest(void) {
-    // Exercise parse + menu build without a GUI session (no NSStatusBar).
-    AppController *c = [[AppController alloc] initWithUI:NO];
-    TSCommand *command = [c valueForKey:@"activeCommand"];
-    [command retain];
-    while ([c valueForKey:@"activeCommand"])
-        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
-    NSString *out = [command->result objectForKey:@"output"];
-    printf("== raw status ==\n%s", out ? [out UTF8String] : "(Tailscale CLI unavailable)\n");
-    [command release];
-    [c menuNeedsUpdate:nil];
-    NSArray *items = [c valueForKeyPath:@"menu.itemArray"];
-    printf("\n== menu (%d items) ==\n", (int)[items count]);
-    for (NSMenuItem *it in items) {
-        const char *t = [[it title] UTF8String];
-        if (t && t[0]) printf("  %s\n", t);
-        else printf("  ---\n");
-    }
-    [c stopPolling];
-    [c release];
+    // Synthetic status only: never contact or print the user's tailnet.
+    NSCAssert([VersionLine(@"1.104.4\n  go version") isEqual:@"1.104.4"], @"version parse");
+    NSCAssert(VersionLine(@"unexpected output") == nil, @"invalid version");
+    NSDictionary *r = ParseStatus([NSDictionary dictionaryWithObject:
+        @"100.x.y.z  local-example  owner@  macOS\n100.a.b.c  peer-example  owner@  macOS\n"
+        forKey:@"output"]);
+    NSCAssert([[r objectForKey:@"selfLine"] isEqual:@"local-example"], @"local heading");
+    NSCAssert([[r objectForKey:@"selfIP"] isEqual:@"100.x.y.z"], @"local IP");
+    NSCAssert([[r objectForKey:@"peers"] count] == 1, @"exclude local peer");
+    r = ParseStatus([NSDictionary dictionaryWithObject:@"Logged out" forKey:@"output"]);
+    NSCAssert([[r objectForKey:@"notice"] isEqual:@"Logged out"], @"logged out");
+    r = ParseStatus([NSDictionary dictionaryWithObject:@"Tailscale is starting" forKey:@"output"]);
+    NSCAssert([[r objectForKey:@"notice"] isEqual:@"Connecting…"], @"connecting");
+    r = ParseStatus([NSDictionary dictionaryWithObject:@"Tailscale CLI unavailable" forKey:@"error"]);
+    NSCAssert([[r objectForKey:@"notice"] isEqual:@"Tailscale CLI unavailable"], @"CLI unavailable");
+    puts("PASS status parsing and menu data self-test");
 }
 
 int main(int argc, const char *argv[]) {
