@@ -1,95 +1,64 @@
-# tailscale-legacy-macos
+# Tailscale for macOS 11 Big Sur — Intel
 
-Run a **current Tailscale client natively on ancient macOS** — proven on OS X
-10.9 Mavericks (2013), joining a 2026 tailscale.com tailnet as a first-class
-node (WireGuard tunnel, `tailscale up --authkey`, MagicDNS, the works).
+An unofficial, independently maintained fork of [startergo/tailscale-legacy-macos](https://github.com/startergo/tailscale-legacy-macos). The original project backports Tailscale to much older macOS releases. This fork adds a separate Intel macOS 11 build for current Tailscale source, since current official Tailscale builds no longer support Big Sur. It is not affiliated with or supported by Tailscale.
 
-Built and tested with tailscale **1.102.4** / Go **1.26.6** targeting
-`darwin/amd64`, deploying from a modern Mac (arm64, Xcode clang).
+**Verified:** Tailscale **1.104.4**, built with Go **1.27.3**, on an Intel Mac running **macOS 11.7.11**. Native utun, authentication, MagicDNS, peer connectivity, Screen Sharing, launchd startup, and restart persistence were tested on that system. Other macOS versions and CPU architectures are not claimed. See [fork release notes](FORK_CHANGELOG.md).
 
-## Why this exists
+## Build on a newer Mac
 
-Official Tailscale needs macOS 10.15+ (Go's floor), and MacPorts' tailscale
-port is `known_fail` on 10.9 ("needs Go 1.26, this macOS runs nothing newer
-than Go 1.17"). The last version buildable on-target (v1.22.2) can no longer
-authenticate: the 2026 control plane rejects its legacy plaintext register
-transport (`http 410: auth path not found` / `API key does not exist`).
-
-The twist: modern Go binaries fail on 10.9 for exactly **four** patchable
-reasons (see [doc/backport-notes.md](doc/backport-notes.md)). Fix those and
-current tailscale runs fine — 17 years of OS underneath, zero spoofing.
-
-## Quickstart
-
-**Install without building** — grab the
-[release](https://github.com/startergo/tailscale-legacy-macos/releases), copy
-to the old Mac, then either:
+Use macOS 13 or newer with Xcode Command Line Tools, `git`, `curl`, and an Intel or Apple Silicon CPU. Go 1.27.3 itself requires macOS 13 or newer; **run the resulting binaries on Big Sur, not the build toolchain**. Keep the downloaded source and toolchain in ignored `src/`.
 
 ```sh
-# .pkg (GUI Installer, or:)          sudo installer -pkg tailscale-1.102.4-macos10.9.pkg -target /
-# tarball:                           tar xzf …tar.gz && cd … && sudo AUTHKEY=tskey-… ./install.sh
-# Snow Leopard (Core 2 CPUs):        use the *-macos10.6.pkg — GOAMD64=v1 flavor
+git clone https://github.com/dankhan/tailscale-legacy-macos.git
+cd tailscale-legacy-macos
+git clone --branch v1.104.4 --depth 1 https://github.com/tailscale/tailscale.git src/tailscale-upstream
+mkdir -p src/toolchains/go1.27.3
+curl -fL https://go.dev/dl/go1.27.3.darwin-arm64.tar.gz -o src/toolchains/go1.27.3.tar.gz
+printf '%s  %s\n' 'dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2' 'src/toolchains/go1.27.3.tar.gz' | shasum -a 256 -c -
+tar -xzf src/toolchains/go1.27.3.tar.gz -C src/toolchains/go1.27.3
+./build-macos11.sh
+./gui/build-gui.sh 11.0
 ```
 
-Both install to `/usr/local/bin` (self-contained binaries — no MacPorts
-needed), load the launchd daemon, keep any existing state, and can join with
-an auth key in the same step. Remove with `scripts/uninstall.sh`.
+The download above is for an **Apple Silicon build host**. On an Intel build host, use `go1.27.3.darwin-amd64.tar.gz` and SHA-256 `b6f8e931e4ab497fcde6da8ae4499a58f9d258e55c8a80824a516eae5950a750` instead. Checksums are from [Go's official download page](https://go.dev/dl/). The build script checks the exact [Tailscale v1.104.4](https://github.com/tailscale/tailscale/releases/tag/v1.104.4) commit and Go version, targets `darwin/amd64` with `GOAMD64=v1` and a macOS 11.0 minimum, and writes `out-macos11/tailscale` and `out-macos11/tailscaled`. `out/TailscaleMenu.app` is the GUI output. These generated files are not tracked.
 
-**Build from source** (on a modern Mac; needs Xcode CLT + go ≥ go.mod's requirement):
+The macOS 11 build uses `shim/macos11_certchain.c` for Go's macOS 12 certificate-chain symbol. It retains normal Security.framework trust evaluation and does **not** apply the inherited peer-credential bypass or fallback-root patch used for older systems. Run the focused certificate checks with `./test/certchain-security/run.sh` on a supported build Mac.
+
+## Install on Big Sur
+
+For a **fresh installation**, transfer the verified output files to the target Mac and run the following in its Terminal from a directory containing `out-macos11/`, `out/TailscaleMenu.app`, and `deploy/`. Review the files and back up any existing installation first; these commands are not an in-place upgrade procedure.
 
 ```sh
-./shim/fetch-shim.sh old-mac          # once: pull MacPorts' compat lib from the target
-./build.sh 1.102.4                       # → out/tailscale{,d}
-./installer/build-pkg.sh                 # optional: flat .pkg
-./deploy/install.sh old-mac tskey-auth-...   # remote install + launchd + join
+sudo install -d -o root -g wheel -m 700 /var/lib/tailscale
+sudo install -o root -g admin -m 755 out-macos11/tailscale /usr/local/bin/tailscale
+sudo install -o root -g admin -m 755 out-macos11/tailscaled /usr/local/bin/tailscaled
+sudo install -o root -g wheel -m 644 deploy/com.tailscale.tailscaled.macos11.plist /Library/LaunchDaemons/com.tailscale.tailscaled.plist
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.tailscale.tailscaled.plist
+sudo ditto out/TailscaleMenu.app /Applications/TailscaleMenu.app
 ```
 
-Smoke-test the toolchain against a target before the big build:
+The macOS 11 plist runs native `utun`, stores state at `/var/lib/tailscale/tailscaled.state`, and uses `/var/run/tailscaled.socket`. Do not run two native Tailscale daemons at once. Add `TailscaleMenu.app` in **System Preferences → Users & Groups → Login Items** for menu-bar startup. The menu uses the installed CLI and production socket; it does not manage the launchd job.
+
+Authenticate interactively, then check status and a peer you control:
 
 ```sh
-SMOKE_HOST=old-mac ./build.sh
+/usr/local/bin/tailscale --socket=/var/run/tailscaled.socket up
+/usr/local/bin/tailscale --socket=/var/run/tailscaled.socket status
+/usr/local/bin/tailscale --socket=/var/run/tailscaled.socket ip -4
+/usr/local/bin/tailscale --socket=/var/run/tailscaled.socket ping <peer-hostname>
+scutil --dns
 ```
 
-The daemon **must** keep `GODEBUG=x509usefallbackroots=1` in its environment
-(handled by the included launchd plist).
+MagicDNS should resolve both the peer's short name and its tailnet FQDN when enabled in the tailnet. If names fail while IP connectivity works, inspect `scutil --dns` and the daemon log. One Big Sur installation needed resolver registration to settle; no extra DNS manager is included here. Screen Sharing can then use a reachable peer's Tailscale name or IP.
 
-## Repo layout
+## Manual upgrade and rollback
 
-```
-build.sh                            one-shot cross-compile
-shim/stub.c                         C stubs for post-10.9 libSystem symbols
-shim/fetch-shim.sh                  fetch MacPorts legacy-support from the target
-patches/001-sign-buildtags.patch    drop 10.14+ keychain register-signing
-patches/files/fallbackroots_darwin109.go   embed Mozilla roots, pure-Go TLS verify
-deploy/com.tailscale.tailscaled.plist      launchd service (with GODEBUG)
-deploy/install.sh                   remote install + join
-test/smoke.go                       runtime/networking smoke test
-doc/backport-notes.md               the full how-it-works + audit method
-```
+Before replacing an existing installation, back up **both installed binaries, the launchd plist, and the authentication state** into a private root-owned directory. Record SHA-256 checksums and the current Tailscale IP. Stop only the existing `com.tailscale.tailscaled` launchd job, install the two verified new binaries, and restart the **unchanged** plist. Allow startup to settle before checking identity, DNS, peer connectivity, GUI behavior, and reboot persistence. Keep the pre-upgrade state backup in case a version change migrates its format.
 
-## Status
+To roll back, stop that launchd job, restore the backed-up CLI and daemon as root-owned mode 755 files, restore the pre-upgrade state **only if needed and only while the daemon is stopped**, then restart the original plist. Do not delete or overwrite a working state file during ordinary binary rollback.
 
-| Target | State |
-|---|---|
-| OS X 10.9 Mavericks (x86_64) | ✅ 1.102.4 running, joined, p2p verified |
-| OS X 10.6 Snow Leopard | ✅ 1.102.4 running (Core 2 Duo, GOAMD64=v1), joined on real hardware — needs 4 extra stubs + peercred patch (below) |
+## Scope and attribution
 
-Upgrade path: re-run `./build.sh <new-version>`. If a newer Go drags in new
-post-10.9 symbols, the dyld error names the first one — extend `shim/stub.c`
-using the audit recipe in the notes.
+The inherited `build.sh`, MacPorts shims, older-target patches, packages, and documents remain for the original project's macOS 10.6/10.9 work; they are **not** the macOS 11 build path. The macOS 11 result is an unsupported community build, verified on one Intel Big Sur configuration. Direct UDP connectivity depends on the network; DERP relay connectivity is valid but may be slower. The GUI reads human-readable CLI status, so future CLI output changes may require maintenance.
 
-Not affiliated with Tailscale. Patches here are for personal/legacy-hardware
-use; the modified binaries are unsupported upstream.
-
-## Verified macOS 11 Big Sur compatibility
-
-Tested on an Intel x86_64 MacBook Pro running **macOS 11.7.11**, with
-**Tailscale 1.102.4 / Go 1.26.6**. Native utun networking, authentication,
-tailnet connectivity, launchd daemon startup, and the hardened menu-bar GUI
-with automatic startup at login work. MagicDNS resolution and hostname-based
-macOS Screen Sharing also work after resolver registration. These functions
-remained operational after a reboot.
-
-This is a verified configuration of this repository's legacy build, not a claim
-of official Tailscale support. MagicDNS behavior may depend on macOS resolver
-registration; check `scutil --dns` if tailnet names do not resolve.
+Original project: [startergo/tailscale-legacy-macos](https://github.com/startergo/tailscale-legacy-macos). Tailscale source and its licensing remain with [tailscale/tailscale](https://github.com/tailscale/tailscale). This fork preserves the inherited project's attribution and files.

@@ -65,6 +65,7 @@ tailscaled.socket
 /*.log
 /logs/
 /diagnostics/
+/.diagnostics/
 
 # Editor-local settings and temporary save files.
 .idea/
