@@ -6,7 +6,7 @@
 - Added a narrow Security.framework compatibility implementation for `SecTrustCopyCertificateChain`, which Go 1.27.3 references but Big Sur does not export. It copies the evaluated certificate chain with Core Foundation ownership semantics; normal trust, hostname, usage, and validity checks remain in Go and macOS. Focused verification and ABI tests are included.
 - Kept the macOS 11 build free of the inherited old-kernel peer-credential authorization bypass and fallback certificate roots. The legacy patches remain available only through the original build path.
 - Improved the native menu-bar app with local device name, Tailscale IPv4, dynamically detected version, clear connection state, and a peer list that excludes the local device. The existing bounded asynchronous CLI execution and lifecycle fixes are retained.
-- Verified on Intel macOS 11.7.11: authentication, native utun routing, MagicDNS, peer connectivity, Screen Sharing, launchd startup, and persistence after reboot. This is community verification, not official Tailscale support or a guarantee for other hosts. Direct UDP was not established in the bounded peer test; DERP connectivity worked.
+- Verified on Intel macOS 11.7.11: authentication, native utun routing, MagicDNS, peer connectivity, Screen Sharing, and automatic daemon and menu-bar startup after reboot. The menu showed the connected state, local device details, and installed version; it remained responsive in bounded observation. This is community verification, not official Tailscale support or a guarantee for other hosts. Direct UDP was not established in the bounded peer test; DERP connectivity worked.
 
 ## Earlier fork baseline — Tailscale 1.102.4
 
