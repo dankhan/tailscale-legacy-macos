@@ -30,7 +30,7 @@ For an **Intel Mac running macOS 11 Big Sur**, download `Tailscale-1.104.4-macOS
 
 The package identifier is `com.dankhan.tailscale-macos11-intel`, version `1.104.4`. It installs `/usr/local/bin/tailscale`, `/usr/local/bin/tailscaled`, `/Library/LaunchDaemons/com.tailscale.tailscaled.plist`, and the complete `/Applications/TailscaleMenu.app`. It creates `/var/lib/tailscale` only when missing. It includes no authentication state, credentials, logs, or local configuration. The daemon starts after installation, but **installation does not join a tailnet**.
 
-For an upgrade, quit Tailscale Menu first. The preinstall script accepts only the known Big Sur launchd job and its state and socket paths; it rejects conflicting daemons or unrelated files. It saves the previous binaries, plist, and menu app (if present) in a private root-owned directory under `/var/backups/tailscale-macos11-installer/`, stops that launchd job before Installer replaces the payload, then restarts it. The existing state file and identity are not overwritten. The package does not change DNS or routes directly. If the installer rejects a customized installation, use the advanced procedure below after reviewing its paths.
+For an upgrade, quit Tailscale Menu first. The preinstall script accepts the verified Big Sur plist and the known earlier plist layout with the verified daemon's implicit `utun` default and inherited `GODEBUG` setting. It rejects changed state or socket paths, extra environment settings, conflicting daemons, and unrelated files. It saves the previous binaries, plist, and menu app (if present) in a private root-owned directory under `/var/backups/tailscale-macos11-installer/`, stops that launchd job before Installer replaces the payload, then restarts it. The existing state file and identity are not overwritten. The package does not change DNS or routes directly. If it rejects a customized installation, use the advanced procedure below after reviewing its paths.
 
 On a fresh installation, run the following in Terminal to authenticate interactively. On an upgrade, use `status` to confirm the existing identity reconnected; do not run `up` again unless you intend to change preferences.
 
@@ -89,10 +89,10 @@ Before replacing an existing installation, back up **both installed binaries, th
 
 To roll back, stop that launchd job, restore the backed-up CLI and daemon as root-owned mode 755 files, restore the pre-upgrade state **only if needed and only while the daemon is stopped**, then restart the original plist. Do not delete or overwrite a working state file during ordinary binary rollback.
 
-If package installation fails after the payload is written, the daemon may remain stopped. Read Installer's error and `/var/log/install.log`. For an upgrade, find the backup directory printed by preinstall (or inspect `/var/backups/tailscale-macos11-installer/` as root), then use these commands with the actual backup path. Keep `/var/lib/tailscale/tailscaled.state` untouched. If the job is still loaded, boot it out before restoring files. Reopen the menu app after recovery.
+If package installation fails after the payload is written, the daemon may remain stopped. Read Installer's error and `/var/log/install.log`. For an upgrade, the installer prints the backup directory and leaves its path in the root-only `pending-backup` file on failure. Run these commands in the Mac's Terminal. After an Installer success followed by a runtime problem, the pointer is removed; use the newest `upgrade.*` backup directory after confirming its timestamp. Keep `/var/lib/tailscale/tailscaled.state` untouched. Reopen the menu app after recovery.
 
 ```sh
-BACKUP=/var/backups/tailscale-macos11-installer/upgrade.REPLACE_ME
+BACKUP=$(sudo cat /var/backups/tailscale-macos11-installer/pending-backup)
 sudo launchctl bootout system/com.tailscale.tailscaled 2>/dev/null || true
 sudo install -o root -g admin -m 755 "$BACKUP/tailscale" /usr/local/bin/tailscale
 sudo install -o root -g admin -m 755 "$BACKUP/tailscaled" /usr/local/bin/tailscaled
@@ -103,6 +103,8 @@ if [ -d "$BACKUP/TailscaleMenu.app" ]; then
 fi
 sudo launchctl bootstrap system /Library/LaunchDaemons/com.tailscale.tailscaled.plist
 ```
+
+If installation stopped before postinstall, `/var/backups/tailscale-macos11-installer/bin-metadata` may remain. It records the prior `/usr/local/bin` owner ID, group ID, and mode as `uid:gid:mode`; restore those directory attributes without changing its contents. The ordinary successful postinstall restores them automatically.
 
 For a failed fresh install, resolve the reported issue and rerun the package. To uninstall, first remove Tailscale Menu from Login Items and quit it, then boot out `system/com.tailscale.tailscaled` and remove only the four installed paths above. Leave `/var/lib/tailscale` in place if you may reinstall; deleting it discards this device's Tailscale identity. Never remove an unrelated Tailscale installation by process name.
 

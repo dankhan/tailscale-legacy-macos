@@ -27,7 +27,8 @@ class InstallerScripts(unittest.TestCase):
             (self.root / path).mkdir(parents=True)
         self.job_state = pathlib.Path(self.temp.name) / "job"
         self.job_state.write_text("0")
-        self.env = dict(os.environ, JOB_STATE=str(self.job_state), TEST_OS="11.7.11", TEST_ARCH="x86_64")
+        self.env = dict(os.environ, JOB_STATE=str(self.job_state), TEST_OS="11.7.11", TEST_ARCH="x86_64",
+                        EXPECTED_PROGRAM=str(self.root / "usr/local/bin/tailscaled"))
         self._mock("id", "echo 0")
         self._mock("sw_vers", "echo \"$TEST_OS\"")
         self._mock("uname", "echo \"$TEST_ARCH\"")
@@ -39,14 +40,14 @@ class InstallerScripts(unittest.TestCase):
             tailscaled) [ "${UNRELATED_DAEMON:-0}" = 1 ] && echo 12346 || { [ "$(cat "$JOB_STATE")" = 1 ] && echo 999999; } ;;
             esac''')
         self._mock("launchctl", '''case "$1" in
-            print) [ "$(cat "$JOB_STATE")" = 1 ] || exit 1; echo 'pid = 999999' ;;
+            print) [ "$(cat "$JOB_STATE")" = 1 ] || exit 1; if [ "${WRONG_JOB:-0}" = 1 ]; then echo 'program = /other/tailscaled'; else echo "program = $EXPECTED_PROGRAM"; fi; echo 'pid = 999999' ;;
             bootout) [ "$(cat "$JOB_STATE")" = 1 ] || exit 1; echo 0 > "$JOB_STATE" ;;
             bootstrap) [ "${BOOTSTRAP_FAIL:-0}" = 1 ] && exit 1; echo 1 > "$JOB_STATE" ;;
             *) exit 2 ;;
             esac''')
         self.pre = self._patched("preinstall")
         self.post = self._patched("postinstall")
-        self.write_expected_plist()
+        self._patched_validator()
 
     def _mock(self, name, body):
         path = self.mock / name
@@ -69,6 +70,13 @@ class InstallerScripts(unittest.TestCase):
         path.chmod(0o755)
         return path
 
+    def _patched_validator(self):
+        script = (REPO / "installer/macos11-scripts/validate-plist.rb").read_text()
+        for original in ("/usr/local", "/var/lib"):
+            script = script.replace(original, str(self.root / original.lstrip("/")))
+        path = pathlib.Path(self.temp.name) / "validate-plist.rb"
+        path.write_text(script)
+
     def run_script(self, path):
         return subprocess.run([str(path), "com.dankhan.tailscale-macos11-intel", "1.104.4", "/"],
                               env=self.env, text=True, capture_output=True)
@@ -84,9 +92,6 @@ class InstallerScripts(unittest.TestCase):
 
     def write_plist(self):
         (self.root / "Library/LaunchDaemons/com.tailscale.tailscaled.plist").write_text(self.plist_text())
-
-    def write_expected_plist(self):
-        (pathlib.Path(self.temp.name) / "expected-plist").write_text(self.plist_text())
 
     def plist_text(self):
         source = (REPO / "deploy/com.tailscale.tailscaled.macos11.plist").read_text()
@@ -110,6 +115,7 @@ class InstallerScripts(unittest.TestCase):
         result = self.run_script(self.post)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.job_state.read_text().strip(), "1")
+        self.assertFalse((self.root / "var/backups/tailscale-macos11-installer/pending-backup").exists())
         self.assertTrue((self.root / "var/lib/tailscale").is_dir())
 
     def test_fresh_install_without_usr_local(self):
@@ -132,6 +138,7 @@ class InstallerScripts(unittest.TestCase):
         self.assertEqual(self.run_script(self.post).returncode, 0)
         self.assertEqual(state.read_text(), "identity sentinel")
         self.assertEqual(self.job_state.read_text().strip(), "1")
+        self.assertFalse((self.root / "var/backups/tailscale-macos11-installer/pending-backup").exists())
 
     def test_rejects_unsupported_targets_before_changes(self):
         for key, value in (("TEST_OS", "12.0"), ("TEST_ARCH", "arm64")):
@@ -168,12 +175,48 @@ class InstallerScripts(unittest.TestCase):
         self.assertNotEqual(self.run_script(self.pre).returncode, 0)
         self.assertEqual(self.job_state.read_text().strip(), "1")
 
+    def test_accepts_verified_legacy_plist(self):
+        self.existing_install()
+        with tarfile.open(CLI_ARCHIVE, "r:gz") as archive:
+            with archive.extractfile("tailscaled") as source, (self.root / "usr/local/bin/tailscaled").open("wb") as target:
+                shutil.copyfileobj(source, target)
+        plist = self.root / "Library/LaunchDaemons/com.tailscale.tailscaled.plist"
+        xml = plist.read_text().replace("<string>--tun=utun</string>", "")
+        xml = xml.replace("<key>RunAtLoad</key>",
+                          "<key>EnvironmentVariables</key><dict><key>GODEBUG</key><string>x509usefallbackroots=1</string></dict>\n<key>RunAtLoad</key>")
+        plist.write_text(xml)
+        result = self.run_script(self.pre)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.job_state.read_text().strip(), "0")
+
+    def test_rejects_implicit_tun_with_unverified_daemon(self):
+        self.existing_install()
+        plist = self.root / "Library/LaunchDaemons/com.tailscale.tailscaled.plist"
+        plist.write_text(plist.read_text().replace("<string>--tun=utun</string>", ""))
+        self.assertNotEqual(self.run_script(self.pre).returncode, 0)
+        self.assertEqual(self.job_state.read_text().strip(), "1")
+
+    def test_rejects_custom_environment_and_loaded_job(self):
+        self.existing_install()
+        plist = self.root / "Library/LaunchDaemons/com.tailscale.tailscaled.plist"
+        plist.write_text(plist.read_text().replace("<key>RunAtLoad</key>",
+                          "<key>EnvironmentVariables</key><dict><key>OTHER</key><string>unsafe</string></dict>\n<key>RunAtLoad</key>"))
+        self.assertNotEqual(self.run_script(self.pre).returncode, 0)
+        self.write_plist()
+        self.env["WRONG_JOB"] = "1"
+        self.assertNotEqual(self.run_script(self.pre).returncode, 0)
+        self.assertEqual(self.job_state.read_text().strip(), "1")
+
     def test_corrupt_payload_does_not_start_daemon(self):
         state = self.existing_install()
         self.assertEqual(self.run_script(self.pre).returncode, 0)
         self.install_payload()
         (self.root / "usr/local/bin/tailscaled").write_text("corrupt")
-        self.assertNotEqual(self.run_script(self.post).returncode, 0)
+        result = self.run_script(self.post)
+        self.assertNotEqual(result.returncode, 0)
+        pointer = self.root / "var/backups/tailscale-macos11-installer/pending-backup"
+        self.assertTrue(pointer.is_file())
+        self.assertIn(pointer.read_text().strip(), result.stderr)
         self.assertEqual(self.job_state.read_text().strip(), "0")
         self.assertEqual(state.read_text(), "identity sentinel")
 
@@ -182,7 +225,10 @@ class InstallerScripts(unittest.TestCase):
         self.assertEqual(self.run_script(self.pre).returncode, 0)
         self.install_payload()
         self.env["BOOTSTRAP_FAIL"] = "1"
-        self.assertNotEqual(self.run_script(self.post).returncode, 0)
+        result = self.run_script(self.post)
+        self.assertNotEqual(result.returncode, 0)
+        pointer = self.root / "var/backups/tailscale-macos11-installer/pending-backup"
+        self.assertIn(pointer.read_text().strip(), result.stderr)
         self.assertEqual(self.job_state.read_text().strip(), "0")
         self.assertEqual(state.read_text(), "identity sentinel")
 

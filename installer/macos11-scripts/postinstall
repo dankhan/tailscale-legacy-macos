@@ -4,8 +4,20 @@ PATH=/usr/bin:/bin:/usr/sbin:/sbin
 PLIST=/Library/LaunchDaemons/com.tailscale.tailscaled.plist
 JOB=system/com.tailscale.tailscaled
 BACKUPS=/var/backups/tailscale-macos11-installer
+PENDING="$BACKUPS/pending-backup"
 
-die() { echo "Tailscale installer: $*; see the README recovery instructions" >&2; exit 1; }
+die() { echo "Tailscale installer: $*" >&2; exit 1; }
+# shellcheck disable=SC2329 # Called by the EXIT trap.
+on_exit() {
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        if [ -f "$PENDING" ]; then
+            echo "Tailscale installer: previous program-file backup: $(/bin/cat "$PENDING")" >&2
+        fi
+        echo "Tailscale installer: boot out $JOB, restore the saved binaries and plist with sudo install, then bootstrap the saved plist; see README for commands. Leave state untouched" >&2
+    fi
+}
+trap on_exit EXIT
 [ "$(/usr/bin/id -u)" = 0 ] || die "root privileges are required"
 
 # Restore metadata even if a later check fails. Never recursively modify /usr/local.
@@ -41,6 +53,7 @@ fi
 count=0
 while [ "$count" -lt 15 ]; do
     if /bin/launchctl print "$JOB" 2>/dev/null | /usr/bin/grep -Eq '^[[:space:]]*pid = [0-9]+'; then
+        /bin/rm -f "$PENDING"
         echo "Tailscale installer: daemon started. Authenticate interactively with /usr/local/bin/tailscale up if this is a fresh installation."
         exit 0
     fi

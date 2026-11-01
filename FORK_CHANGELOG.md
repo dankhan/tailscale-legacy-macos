@@ -3,7 +3,7 @@
 ## macOS 11 Intel package installer
 
 - Added a separate unsigned `.pkg` builder for the exact verified 1.104.4 release assets. It checks archive and executable hashes, installs the CLI, daemon, Big Sur launchd plist, and menu app, and leaves authentication interactive.
-- Added guarded preinstall and postinstall scripts for fresh installation and in-place upgrade. They preserve state, back up installed program files, stop only the matching launchd job before payload replacement, and reject conflicting installations. Sandboxed script tests cover normal and failure paths.
+- Added guarded preinstall and postinstall scripts for fresh installation and in-place upgrade. They preserve state, back up installed program files, stop only the matching launchd job before payload replacement, and accept the verified prior Big Sur plist's implicit `utun` setting while rejecting conflicting installations. Sandboxed script tests cover normal and failure paths.
 
 ## Tailscale 1.104.4 — Intel macOS 11 Big Sur
 

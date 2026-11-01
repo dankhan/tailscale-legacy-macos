@@ -40,8 +40,7 @@ check_sha 7ce45c2a268618f7a52b663c5db273fa146026111d0811df2a10a35fd97adede "$STA
 /usr/bin/install -m 755 "$STAGE/input/tailscaled" "$STAGE/root/usr/local/bin/tailscaled"
 /usr/bin/install -m 644 "$ROOT/deploy/com.tailscale.tailscaled.macos11.plist" "$STAGE/root/Library/LaunchDaemons/com.tailscale.tailscaled.plist"
 /usr/bin/ditto "$STAGE/input/TailscaleMenu.app" "$STAGE/root/Applications/TailscaleMenu.app"
-/bin/cp "$ROOT/installer/macos11-scripts/preinstall" "$ROOT/installer/macos11-scripts/postinstall" "$STAGE/scripts/"
-/usr/bin/install -m 644 "$ROOT/deploy/com.tailscale.tailscaled.macos11.plist" "$STAGE/scripts/expected-plist"
+/bin/cp "$ROOT/installer/macos11-scripts/preinstall" "$ROOT/installer/macos11-scripts/postinstall" "$ROOT/installer/macos11-scripts/validate-plist.rb" "$STAGE/scripts/"
 /bin/chmod 755 "$STAGE/scripts/preinstall" "$STAGE/scripts/postinstall"
 /usr/bin/xattr -cr "$STAGE/root" "$STAGE/scripts"
 
