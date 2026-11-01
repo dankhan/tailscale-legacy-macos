@@ -1,5 +1,10 @@
 # Fork changelog
 
+## macOS 11 Intel package installer
+
+- Added a separate unsigned `.pkg` builder for the exact verified 1.104.4 release assets. It checks archive and executable hashes, installs the CLI, daemon, Big Sur launchd plist, and menu app, and leaves authentication interactive.
+- Added guarded preinstall and postinstall scripts for fresh installation and in-place upgrade. They preserve state, back up installed program files, stop only the matching launchd job before payload replacement, and accept the verified prior Big Sur plist's implicit `utun` setting while rejecting conflicting installations. Sandboxed script tests cover normal and failure paths.
+
 ## Tailscale 1.104.4 — Intel macOS 11 Big Sur
 
 - Added a separate, pinned macOS 11 build using [Tailscale v1.104.4](https://github.com/tailscale/tailscale/releases/tag/v1.104.4) and [Go 1.27.3](https://go.dev/dl/), targeting `darwin/amd64`, `GOAMD64=v1`, and macOS 11.0. The original older-macOS build remains separate.

@@ -1,0 +1,115 @@
+#!/bin/bash
+# Installer runs this before it writes the payload. Never stop by process name.
+set -euo pipefail
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+PLIST=/Library/LaunchDaemons/com.tailscale.tailscaled.plist
+JOB=system/com.tailscale.tailscaled
+BACKUPS=/var/backups/tailscale-macos11-installer
+PENDING="$BACKUPS/pending-backup"
+BACKUP_POINTER_READY=0
+
+die() { echo "Tailscale installer: $*" >&2; exit 1; }
+# shellcheck disable=SC2329 # Called by the EXIT trap.
+on_exit() {
+    status=$?
+    if [ "$status" -ne 0 ] && [ "$BACKUP_POINTER_READY" = 1 ]; then
+        echo "Tailscale installer: previous program-file backup: $(/bin/cat "$PENDING")" >&2
+        echo "Tailscale installer: if files were replaced, boot out $JOB, restore the saved binaries and plist with sudo install, then bootstrap the saved plist; see README for commands. Leave state untouched" >&2
+    fi
+}
+trap on_exit EXIT
+[ "$(/usr/bin/id -u)" = 0 ] || die "root privileges are required"
+case "$(/usr/bin/sw_vers -productVersion)" in 11.*) ;; *) die "requires macOS 11 Big Sur" ;; esac
+[ "$(/usr/bin/uname -m)" = x86_64 ] || die "requires an Intel Mac"
+[ "${3:-/}" = / ] || die "install to the startup volume only"
+
+for path in /usr/local /usr/local/bin /Applications /Library/LaunchDaemons \
+    /usr/local/bin/tailscale /usr/local/bin/tailscaled "$PLIST" /Applications/TailscaleMenu.app /var/lib/tailscale /var/backups "$BACKUPS"; do
+    [ ! -L "$path" ] || die "refusing symlink at $path"
+done
+[ ! -e /usr/local ] || [ -d /usr/local ] || die "/usr/local is not a directory"
+[ ! -e /usr/local/bin ] || [ -d /usr/local/bin ] || die "/usr/local/bin is not a directory"
+[ -d /Applications ] || die "/Applications must be a directory"
+[ ! -e "$BACKUPS" ] || [ -d "$BACKUPS" ] || die "backup path is not a directory"
+[ ! -e "$BACKUPS" ] || [ "$(/usr/bin/stat -f '%u' "$BACKUPS")" = 0 ] || die "backup directory is not root-owned"
+[ ! -e "$BACKUPS/bin-metadata" ] || [ ! -L "$BACKUPS/bin-metadata" ] || die "backup metadata is a symlink"
+[ ! -e "$PENDING" ] || [ ! -L "$PENDING" ] || die "backup pointer is a symlink"
+
+if [ -e /Applications/TailscaleMenu.app ]; then
+    [ -d /Applications/TailscaleMenu.app ] || die "menu app path is not a directory"
+    [ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' /Applications/TailscaleMenu.app/Contents/Info.plist 2>/dev/null || true)" = com.startergo.tailscale-menu ] || die "existing menu app is unrelated"
+    /usr/bin/pgrep -x TailscaleMenu >/dev/null 2>&1 && die "quit Tailscale Menu before installing, then retry"
+fi
+
+if [ -e "$PLIST" ]; then
+    /usr/bin/plutil -lint "$PLIST" >/dev/null || die "existing launchd plist is invalid"
+    mode="$(/usr/bin/ruby "$(/usr/bin/dirname "$0")/validate-plist.rb" "$PLIST")" || die "existing launchd plist is incompatible"
+    if [ "$mode" = implicit-utun ]; then
+        [ -f /usr/local/bin/tailscaled ] || die "implicit tunnel mode requires the verified daemon"
+        digest="$(/usr/bin/shasum -a 256 /usr/local/bin/tailscaled | /usr/bin/awk '{print $1}')"
+        [ "$digest" = 689d47a7f40933aa872cb530bc573d83b349328339c8849ad1dba5061d0436ce ] || die "implicit tunnel mode requires the verified daemon"
+    fi
+elif [ -e /usr/local/bin/tailscale ] || [ -e /usr/local/bin/tailscaled ]; then
+    die "existing binaries have no matching launchd plist; inspect them before installing"
+fi
+
+JOB_PRINT="$(/bin/launchctl print "$JOB" 2>/dev/null || true)"
+JOB_PID="$(printf '%s\n' "$JOB_PRINT" | /usr/bin/sed -n 's/^[[:space:]]*pid = \([0-9][0-9]*\)$/\1/p' | /usr/bin/head -1)"
+[ -z "$JOB_PRINT" ] || [ -e "$PLIST" ] || die "launchd label is occupied by an unrelated job"
+if [ -n "$JOB_PRINT" ]; then
+    printf '%s\n' "$JOB_PRINT" | /usr/bin/grep -Eq '^[[:space:]]*program = /usr/local/bin/tailscaled$' || die "loaded launchd job uses another executable"
+fi
+for pid in $(/usr/bin/pgrep -x tailscaled 2>/dev/null || true); do
+    [ "$pid" = "$JOB_PID" ] || die "another tailscaled process is running (PID $pid); resolve it manually"
+done
+
+# Only program files are backed up; state and authentication remain untouched.
+/bin/mkdir -p "$BACKUPS"
+/usr/sbin/chown root:wheel "$BACKUPS"
+/bin/chmod 700 "$BACKUPS"
+/bin/rm -f "$PENDING"
+if [ -e "$PLIST" ]; then
+    BACKUP="$(/usr/bin/mktemp -d "$BACKUPS/upgrade.XXXXXXXX")"
+    /usr/sbin/chown root:wheel "$BACKUP"
+    /bin/chmod 700 "$BACKUP"
+    for name in tailscale tailscaled; do
+        if [ -e "/usr/local/bin/$name" ]; then /usr/bin/ditto "/usr/local/bin/$name" "$BACKUP/$name"; fi
+    done
+    /usr/bin/ditto "$PLIST" "$BACKUP/com.tailscale.tailscaled.plist"
+    if [ -d /Applications/TailscaleMenu.app ]; then /usr/bin/ditto /Applications/TailscaleMenu.app "$BACKUP/TailscaleMenu.app"; fi
+    umask 077
+    printf '%s\n' "$BACKUP" > "$PENDING"
+    /bin/chmod 600 "$PENDING"
+    BACKUP_POINTER_READY=1
+    echo "Tailscale installer: previous program files saved in $BACKUP"
+fi
+
+# The payload includes /usr/local/bin; restore its existing metadata in postinstall.
+/bin/mkdir -p "$BACKUPS"
+/usr/sbin/chown root:wheel "$BACKUPS"
+/bin/chmod 700 "$BACKUPS"
+/bin/rm -f "$BACKUPS/bin-metadata"
+if [ -d /usr/local/bin ]; then
+    umask 077
+    /usr/bin/stat -f '%u:%g:%Lp' /usr/local/bin > "$BACKUPS/bin-metadata"
+    /bin/chmod 600 "$BACKUPS/bin-metadata"
+else
+    /bin/rm -f "$BACKUPS/bin-metadata"
+fi
+
+if [ -n "$JOB_PRINT" ]; then
+    /bin/launchctl bootout "$JOB" || die "could not stop the known launchd job"
+    count=0
+    while [ "$count" -lt 20 ]; do
+        if [ -n "$JOB_PID" ] && /bin/kill -0 "$JOB_PID" 2>/dev/null; then
+            /bin/sleep 1
+        elif /bin/launchctl print "$JOB" >/dev/null 2>&1; then
+            /bin/sleep 1
+        else
+            break
+        fi
+        count=$((count + 1))
+    done
+    [ "$count" -lt 20 ] || die "daemon did not exit; payload was not installed"
+fi
+exit 0
