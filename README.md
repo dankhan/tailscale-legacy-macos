@@ -105,7 +105,20 @@ fi
 sudo launchctl bootstrap system /Library/LaunchDaemons/com.tailscale.tailscaled.plist
 ```
 
-If installation stopped before postinstall, `/var/backups/tailscale-macos11-installer/bin-metadata` may remain. It records the prior `/usr/local/bin` owner ID, group ID, and mode as `uid:gid:mode`; restore those directory attributes without changing its contents. The ordinary successful postinstall restores them automatically.
+If installation stopped before postinstall, restore `/usr/local/bin` directory metadata from its saved `uid:gid:mode` record. This changes only the directory itself; ordinary successful postinstall does this automatically.
+
+```sh
+META_FILE=/var/backups/tailscale-macos11-installer/bin-metadata
+if sudo test -f "$META_FILE"; then
+  META=$(sudo cat "$META_FILE")
+  OWNER_ID=${META%%:*}
+  REST=${META#*:}
+  GROUP_ID=${REST%%:*}
+  DIR_MODE=${META##*:}
+  sudo chown "$OWNER_ID:$GROUP_ID" /usr/local/bin
+  sudo chmod "$DIR_MODE" /usr/local/bin
+fi
+```
 
 For a failed fresh install, resolve the reported issue and rerun the package. To uninstall, first remove Tailscale Menu from Login Items and quit it, then boot out `system/com.tailscale.tailscaled` and remove only the four installed paths above. Leave `/var/lib/tailscale` in place if you may reinstall; deleting it discards this device's Tailscale identity. Never remove an unrelated Tailscale installation by process name.
 
