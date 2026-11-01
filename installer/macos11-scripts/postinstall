@@ -1,0 +1,50 @@
+#!/bin/bash
+set -euo pipefail
+PATH=/usr/bin:/bin:/usr/sbin:/sbin
+PLIST=/Library/LaunchDaemons/com.tailscale.tailscaled.plist
+JOB=system/com.tailscale.tailscaled
+BACKUPS=/var/backups/tailscale-macos11-installer
+
+die() { echo "Tailscale installer: $*; see the README recovery instructions" >&2; exit 1; }
+[ "$(/usr/bin/id -u)" = 0 ] || die "root privileges are required"
+
+# Restore metadata even if a later check fails. Never recursively modify /usr/local.
+if [ -f "$BACKUPS/bin-metadata" ]; then
+    IFS=: read -r owner group mode < "$BACKUPS/bin-metadata"
+    /usr/sbin/chown "$owner:$group" /usr/local/bin || die "could not restore /usr/local/bin ownership"
+    /bin/chmod "$mode" /usr/local/bin || die "could not restore /usr/local/bin permissions"
+    /bin/rm "$BACKUPS/bin-metadata"
+fi
+
+for name in tailscale tailscaled; do
+    [ -f "/usr/local/bin/$name" ] && [ ! -L "/usr/local/bin/$name" ] || die "missing installed $name"
+    /usr/sbin/chown root:admin "/usr/local/bin/$name"
+    /bin/chmod 755 "/usr/local/bin/$name"
+done
+/usr/sbin/chown root:wheel "$PLIST"
+/bin/chmod 644 "$PLIST"
+[ -d /Applications/TailscaleMenu.app ] && [ ! -L /Applications/TailscaleMenu.app ] || die "missing menu app"
+/usr/sbin/chown -R root:wheel /Applications/TailscaleMenu.app
+
+sha() { /usr/bin/shasum -a 256 "$2" | /usr/bin/awk '{print $1}' | /usr/bin/grep -qx "$1"; }
+sha 6e9505c4b9969e9a2cd58e9f2d3c0913c5a6c0173f721b009af2be2af4c472cb /usr/local/bin/tailscale || die "CLI checksum mismatch"
+sha 689d47a7f40933aa872cb530bc573d83b349328339c8849ad1dba5061d0436ce /usr/local/bin/tailscaled || die "daemon checksum mismatch"
+sha 7ce45c2a268618f7a52b663c5db273fa146026111d0811df2a10a35fd97adede /Applications/TailscaleMenu.app/Contents/MacOS/TailscaleMenu || die "menu executable checksum mismatch"
+
+if [ ! -d /var/lib/tailscale ]; then
+    /usr/bin/install -d -o root -g wheel -m 700 /var/lib/tailscale || die "could not create state directory"
+fi
+[ ! -L /var/lib/tailscale ] && [ -d /var/lib/tailscale ] || die "unsafe state directory"
+/usr/sbin/chown root:wheel /var/lib/tailscale
+/bin/chmod 700 /var/lib/tailscale
+/bin/launchctl bootstrap system "$PLIST" || die "launchd bootstrap failed"
+count=0
+while [ "$count" -lt 15 ]; do
+    if /bin/launchctl print "$JOB" 2>/dev/null | /usr/bin/grep -Eq '^[[:space:]]*pid = [0-9]+'; then
+        echo "Tailscale installer: daemon started. Authenticate interactively with /usr/local/bin/tailscale up if this is a fresh installation."
+        exit 0
+    fi
+    /bin/sleep 1
+    count=$((count + 1))
+done
+die "launchd job has no running daemon"
