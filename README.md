@@ -92,12 +92,13 @@ To roll back, stop that launchd job, restore the backed-up CLI and daemon as roo
 If package installation fails after the payload is written, the daemon may remain stopped. Read Installer's error and `/var/log/install.log`. For an upgrade, the installer prints the backup directory and leaves its path in the root-only `pending-backup` file on failure. Run these commands in the Mac's Terminal. After an Installer success followed by a runtime problem, the pointer is removed; use the newest `upgrade.*` backup directory after confirming its timestamp. Keep `/var/lib/tailscale/tailscaled.state` untouched. Reopen the menu app after recovery.
 
 ```sh
-BACKUP=$(sudo cat /var/backups/tailscale-macos11-installer/pending-backup)
+BACKUP=$(sudo /bin/sh -c 'cat /var/backups/tailscale-macos11-installer/pending-backup 2>/dev/null || ls -dt /var/backups/tailscale-macos11-installer/upgrade.* | head -1')
+sudo ls -ld "$BACKUP"  # confirm this is the backup from this installation
 sudo launchctl bootout system/com.tailscale.tailscaled 2>/dev/null || true
 sudo install -o root -g admin -m 755 "$BACKUP/tailscale" /usr/local/bin/tailscale
 sudo install -o root -g admin -m 755 "$BACKUP/tailscaled" /usr/local/bin/tailscaled
 sudo install -o root -g wheel -m 644 "$BACKUP/com.tailscale.tailscaled.plist" /Library/LaunchDaemons/com.tailscale.tailscaled.plist
-if [ -d "$BACKUP/TailscaleMenu.app" ]; then
+if sudo test -d "$BACKUP/TailscaleMenu.app"; then
   if [ -e /Applications/TailscaleMenu.app ]; then sudo rm -R /Applications/TailscaleMenu.app; fi
   sudo ditto "$BACKUP/TailscaleMenu.app" /Applications/TailscaleMenu.app
 fi
