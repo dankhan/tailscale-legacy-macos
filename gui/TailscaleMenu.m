@@ -573,7 +573,7 @@ static NSDictionary *ParseStatus(NSDictionary *result) {
 
 static void SelfTest(void) {
     // Synthetic status only: never contact or print the user's tailnet.
-    NSCAssert([VersionLine(@"1.104.4\n  go version") isEqual:@"1.104.4"], @"version parse");
+    NSCAssert([VersionLine(@"1.104.7\n  go version") isEqual:@"1.104.7"], @"version parse");
     NSCAssert(VersionLine(@"unexpected output") == nil, @"invalid version");
     NSDictionary *r = ParseStatus([NSDictionary dictionaryWithObject:
         @"100.x.y.z  local-example  owner@  macOS\n100.a.b.c  peer-example  owner@  macOS\n"
