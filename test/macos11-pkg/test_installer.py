@@ -3,6 +3,7 @@
 import os
 import pathlib
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
@@ -11,9 +12,11 @@ import unittest
 import zipfile
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-ASSETS = pathlib.Path(sys.argv.pop(1)).resolve() if len(sys.argv) > 1 else REPO / "dist/release-assets"
-CLI_ARCHIVE = ASSETS / "tailscale-macos11-x86_64-v1.104.4.tar.gz"
-GUI_ARCHIVE = ASSETS / "TailscaleMenu-macos11-x86_64-v1.104.4.zip"
+ASSETS = pathlib.Path(sys.argv.pop(1)).resolve() if len(sys.argv) > 1 else REPO / "dist/candidate-assets"
+CLI_ARCHIVE = ASSETS / "tailscale-macos11-x86_64-v1.104.7.tar.gz"
+GUI_ARCHIVE = ASSETS / "TailscaleMenu-macos11-x86_64-v1.104.7.zip"
+LEGACY_CLI_ARCHIVE = (pathlib.Path(sys.argv.pop(1)).resolve() if len(sys.argv) > 1 else
+                      REPO / "dist/verified-1.104.4/tailscale-macos11-x86_64-v1.104.4.tar.gz")
 
 
 class InstallerScripts(unittest.TestCase):
@@ -78,7 +81,7 @@ class InstallerScripts(unittest.TestCase):
         path.write_text(script)
 
     def run_script(self, path):
-        return subprocess.run([str(path), "com.dankhan.tailscale-macos11-intel", "1.104.4", "/"],
+        return subprocess.run([str(path), "com.dankhan.tailscale-macos11-intel", "1.104.7", "/"],
                               env=self.env, text=True, capture_output=True)
 
     def install_payload(self):
@@ -128,14 +131,21 @@ class InstallerScripts(unittest.TestCase):
 
     def test_upgrade_preserves_state_and_backs_up_program_files(self):
         state = self.existing_install()
+        with zipfile.ZipFile(GUI_ARCHIVE) as archive:
+            archive.extractall(self.root / "Applications")
+        bin_dir = self.root / "usr/local/bin"
+        bin_dir.chmod(0o775)
         result = self.run_script(self.pre)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.job_state.read_text().strip(), "0")
         backup = next((self.root / "var/backups/tailscale-macos11-installer").glob("upgrade.*"))
         self.assertEqual((backup / "tailscaled").read_text(), "old daemon")
         self.assertTrue((backup / "com.tailscale.tailscaled.plist").is_file())
+        self.assertTrue((backup / "TailscaleMenu.app/Contents/MacOS/TailscaleMenu").is_file())
+        bin_dir.chmod(0o755)  # Simulate Installer replacing directory metadata.
         self.install_payload()
         self.assertEqual(self.run_script(self.post).returncode, 0)
+        self.assertEqual(stat.S_IMODE(bin_dir.stat().st_mode), 0o775)
         self.assertEqual(state.read_text(), "identity sentinel")
         self.assertEqual(self.job_state.read_text().strip(), "1")
         self.assertFalse((self.root / "var/backups/tailscale-macos11-installer/pending-backup").exists())
@@ -177,7 +187,7 @@ class InstallerScripts(unittest.TestCase):
 
     def test_accepts_verified_legacy_plist(self):
         self.existing_install()
-        with tarfile.open(CLI_ARCHIVE, "r:gz") as archive:
+        with tarfile.open(LEGACY_CLI_ARCHIVE, "r:gz") as archive:
             with archive.extractfile("tailscaled") as source, (self.root / "usr/local/bin/tailscaled").open("wb") as target:
                 shutil.copyfileobj(source, target)
         plist = self.root / "Library/LaunchDaemons/com.tailscale.tailscaled.plist"

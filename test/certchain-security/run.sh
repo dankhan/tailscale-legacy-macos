@@ -3,7 +3,7 @@
 # links the exact production shim source; no fallback root or trust override.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-GO="$ROOT/src/toolchains/go1.27.3/go/bin/go"
+GO="$ROOT/src/toolchains/go1.27.4/go/bin/go"
 OUT="$ROOT/test/.artifacts/certchain-security"
 mkdir -p "$OUT"
 export GOTOOLCHAIN=local GOPATH="$ROOT/src/toolchains/gopath"

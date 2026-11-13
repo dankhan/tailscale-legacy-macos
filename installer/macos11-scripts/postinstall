@@ -39,9 +39,9 @@ done
 /usr/sbin/chown -R root:wheel /Applications/TailscaleMenu.app
 
 sha() { /usr/bin/shasum -a 256 "$2" | /usr/bin/awk '{print $1}' | /usr/bin/grep -qx "$1"; }
-sha 6e9505c4b9969e9a2cd58e9f2d3c0913c5a6c0173f721b009af2be2af4c472cb /usr/local/bin/tailscale || die "CLI checksum mismatch"
-sha 689d47a7f40933aa872cb530bc573d83b349328339c8849ad1dba5061d0436ce /usr/local/bin/tailscaled || die "daemon checksum mismatch"
-sha 7ce45c2a268618f7a52b663c5db273fa146026111d0811df2a10a35fd97adede /Applications/TailscaleMenu.app/Contents/MacOS/TailscaleMenu || die "menu executable checksum mismatch"
+sha 6d542d812a57a649aa00b5d41730e57ac64b2a1ffa4164fe253bee6c163d23b5 /usr/local/bin/tailscale || die "CLI checksum mismatch"
+sha 62811296d89503a9f359afb88ec5a0342b376085297ffc134aa354f7f89924b5 /usr/local/bin/tailscaled || die "daemon checksum mismatch"
+sha 26be8dc0fdc7ef704a858e82f9140509c74bcb5eca6608e282c5ac11e1703b09 /Applications/TailscaleMenu.app/Contents/MacOS/TailscaleMenu || die "menu executable checksum mismatch"
 
 if [ ! -d /var/lib/tailscale ]; then
     /usr/bin/install -d -o root -g wheel -m 700 /var/lib/tailscale || die "could not create state directory"

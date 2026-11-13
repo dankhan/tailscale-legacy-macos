@@ -1,5 +1,12 @@
 # Fork changelog
 
+## Tailscale 1.104.7 — Intel macOS 11 Big Sur
+
+- Updated the pinned upstream source to v1.104.7 and the isolated build toolchain to Go 1.27.4. The existing macOS 11 deployment target, certificate-chain shim, and peer-credential authorization remain unchanged.
+- Included upstream daemon fixes for transient UDP read errors during network changes and the Go TLS ClientHello middlebox compatibility fix. Upstream macOS network-extension DNS changes are not assumed to apply to this standalone daemon.
+- Updated the version-aware menu self-test and hash-bound package builder for the accepted 1.104.7 assets. The guarded upgrade retains the verified 1.104.4 implicit-utun daemon hash; the existing state and rollback behavior are unchanged.
+- Built the CLI and daemon twice with matching hashes and passed local certificate, ABI, GUI, local API, socket, and installer fixture checks. The exact package passed an in-place upgrade on Intel macOS 11.7.11 with identity preserved, native utun networking, peer connectivity, MagicDNS, Screen Sharing, a responsive connected menu, and reboot persistence. The 1.104.4 release remains available for rollback.
+
 ## macOS 11 Intel package installer
 
 - Added a separate unsigned `.pkg` builder for the exact verified 1.104.4 release assets. It checks archive and executable hashes, installs the CLI, daemon, Big Sur launchd plist, and menu app, and leaves authentication interactive.

@@ -6,19 +6,19 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SOURCE="${SOURCE:-$ROOT/src/tailscale-upstream}"
-GO="${GO:-$ROOT/src/toolchains/go1.27.3/go/bin/go}"
-PIN=27047635f237d1f3e0b08c0f487674757f30d2f7
-VERSION=1.104.4
+GO="${GO:-$ROOT/src/toolchains/go1.27.4/go/bin/go}"
+PIN=cbc74fe48ef1b1649f69a4d9a602319427e25102
+VERSION=1.104.7
 
-test -x "$GO" || { echo "missing isolated Go 1.27.3: $GO" >&2; exit 1; }
+test -x "$GO" || { echo "missing isolated Go 1.27.4: $GO" >&2; exit 1; }
 case "$("$GO" version)" in
-    'go version go1.27.3 darwin/arm64'|'go version go1.27.3 darwin/amd64') ;;
+    'go version go1.27.4 darwin/arm64'|'go version go1.27.4 darwin/amd64') ;;
     *) echo "unexpected Go toolchain" >&2; exit 1 ;;
 esac
 test "$(git -C "$SOURCE" rev-parse HEAD)" = "$PIN" || {
     echo "upstream source is not the pinned v$VERSION commit" >&2; exit 1;
 }
-test "$(sed -n 's/^go //p' "$SOURCE/go.mod")" = '1.27.3' || {
+test "$(sed -n 's/^go //p' "$SOURCE/go.mod")" = '1.27.4' || {
     echo "unexpected upstream go.mod requirement" >&2; exit 1;
 }
 test -z "$(git -C "$SOURCE" status --porcelain)" || {

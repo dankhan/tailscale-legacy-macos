@@ -2,33 +2,33 @@
 
 An unofficial, independently maintained fork of [startergo/tailscale-legacy-macos](https://github.com/startergo/tailscale-legacy-macos). The original project backports Tailscale to much older macOS releases. This fork adds a separate Intel macOS 11 build for current Tailscale source, since current official Tailscale builds no longer support Big Sur. It is not affiliated with or supported by Tailscale.
 
-**Verified:** Tailscale **1.104.4**, built with Go **1.27.3**, on an Intel Mac running **macOS 11.7.11**. Native utun, authentication, MagicDNS, peer connectivity, Screen Sharing, launchd startup, and restart persistence were tested on that system. Other macOS versions and CPU architectures are not claimed. See [fork release notes](FORK_CHANGELOG.md).
+**Verified:** Tailscale **1.104.7**, built with Go **1.27.4**, on an Intel Mac running **macOS 11.7.11**. Native utun, authentication-state preservation on upgrade, MagicDNS, peer connectivity, Screen Sharing, the menu app, and reboot persistence were tested on that system. Other macOS versions and CPU architectures are not claimed. See [fork release notes](FORK_CHANGELOG.md).
 
 ## Build on a newer Mac
 
-Use macOS 13 or newer with Xcode Command Line Tools, `git`, `curl`, and an Intel or Apple Silicon CPU. Go 1.27.3 itself requires macOS 13 or newer; **run the resulting binaries on Big Sur, not the build toolchain**. Keep the downloaded source and toolchain in ignored `src/`.
+Use macOS 13 or newer with Xcode Command Line Tools, `git`, `curl`, and an Intel or Apple Silicon CPU. Go 1.27.4 itself requires macOS 13 or newer; **run the resulting binaries on Big Sur, not the build toolchain**. Keep the downloaded source and toolchain in ignored `src/`.
 
 ```sh
 git clone https://github.com/dankhan/tailscale-legacy-macos.git
 cd tailscale-legacy-macos
-git clone --branch v1.104.4 --depth 1 https://github.com/tailscale/tailscale.git src/tailscale-upstream
-mkdir -p src/toolchains/go1.27.3
-curl -fL https://go.dev/dl/go1.27.3.darwin-arm64.tar.gz -o src/toolchains/go1.27.3.tar.gz
-printf '%s  %s\n' 'dd3908cf20959d798c1e06ebe5b72213f0505ce01373b40ce3110975a6cd99c2' 'src/toolchains/go1.27.3.tar.gz' | shasum -a 256 -c -
-tar -xzf src/toolchains/go1.27.3.tar.gz -C src/toolchains/go1.27.3
+git clone --branch v1.104.7 --depth 1 https://github.com/tailscale/tailscale.git src/tailscale-upstream
+mkdir -p src/toolchains/go1.27.4
+curl -fL https://go.dev/dl/go1.27.4.darwin-arm64.tar.gz -o src/toolchains/go1.27.4.tar.gz
+printf '%s  %s\n' '91a44a2b8a716600ad94a4f143e156116620db8828086a6e3602291be9bd0bb4' 'src/toolchains/go1.27.4.tar.gz' | shasum -a 256 -c -
+tar -xzf src/toolchains/go1.27.4.tar.gz -C src/toolchains/go1.27.4
 ./build-macos11.sh
 ./gui/build-gui.sh 11.0
 ```
 
-The download above is for an **Apple Silicon build host**. On an Intel build host, use `go1.27.3.darwin-amd64.tar.gz` and SHA-256 `b6f8e931e4ab497fcde6da8ae4499a58f9d258e55c8a80824a516eae5950a750` instead. Checksums are from [Go's official download page](https://go.dev/dl/). The build script checks the exact [Tailscale v1.104.4](https://github.com/tailscale/tailscale/releases/tag/v1.104.4) commit and Go version, targets `darwin/amd64` with `GOAMD64=v1` and a macOS 11.0 minimum, and writes `out-macos11/tailscale` and `out-macos11/tailscaled`. `out/TailscaleMenu.app` is the GUI output. These generated files are not tracked.
+The download above is for an **Apple Silicon build host**. On an Intel build host, use `go1.27.4.darwin-amd64.tar.gz` and SHA-256 `2b799377704ef12db39bd254995d5c348c9cc8d86562ca817724390e56c38f43` instead. Checksums are from [Go's official download page](https://go.dev/dl/). The build script checks the exact [Tailscale v1.104.7](https://github.com/tailscale/tailscale/releases/tag/v1.104.7) commit and Go version, targets `darwin/amd64` with `GOAMD64=v1` and a macOS 11.0 minimum, and writes `out-macos11/tailscale` and `out-macos11/tailscaled`. `out/TailscaleMenu.app` is the GUI output. These generated files are not tracked.
 
 The macOS 11 build uses `shim/macos11_certchain.c` for Go's macOS 12 certificate-chain symbol. It retains normal Security.framework trust evaluation and does **not** apply the inherited peer-credential bypass or fallback-root patch used for older systems. Run the focused certificate checks with `./test/certchain-security/run.sh` on a supported build Mac.
 
 ## Recommended: Install with the macOS package
 
-For an **Intel Mac running macOS 11 Big Sur**, download `Tailscale-1.104.4-macOS11-Intel.pkg` from the [verified release](https://github.com/dankhan/tailscale-legacy-macos/releases/tag/big-sur-v1.104.4-verified). Verify its SHA-256 with `shasum -a 256 Tailscale-1.104.4-macOS11-Intel.pkg`; the expected value is `c045a07abfafccc4fdfa928f4b0c6ad325090cde89c5c3cd4f6389b1d63ac46e`. Then open the package in macOS Installer and authorize installation. This installer is unsigned and unnotarized; after verifying its checksum, you may need to use Finder's **Open** action or **System Preferences → Security & Privacy → General → Open Anyway**.
+For an **Intel Mac running macOS 11 Big Sur**, download `Tailscale-1.104.7-macOS11-Intel.pkg` from the [verified release](https://github.com/dankhan/tailscale-legacy-macos/releases/tag/big-sur-v1.104.7-verified). Verify its SHA-256 with `shasum -a 256 Tailscale-1.104.7-macOS11-Intel.pkg`; the expected value is `f01270d6183caa2cdee82f8af0ed67c43336d7a54743e25b793aa0a139b4b213`. Then open the package in macOS Installer and authorize installation. This installer is unsigned and unnotarized; after verifying its checksum, you may need to use Finder's **Open** action or **System Preferences → Security & Privacy → General → Open Anyway**.
 
-The package identifier is `com.dankhan.tailscale-macos11-intel`, version `1.104.4`. It installs `/usr/local/bin/tailscale`, `/usr/local/bin/tailscaled`, `/Library/LaunchDaemons/com.tailscale.tailscaled.plist`, and the complete `/Applications/TailscaleMenu.app`. It creates `/var/lib/tailscale` only when missing. It includes no authentication state, credentials, logs, or local configuration. The daemon starts after installation, but **installation does not join a tailnet**.
+The package identifier is `com.dankhan.tailscale-macos11-intel`, version `1.104.7`. It installs `/usr/local/bin/tailscale`, `/usr/local/bin/tailscaled`, `/Library/LaunchDaemons/com.tailscale.tailscaled.plist`, and the complete `/Applications/TailscaleMenu.app`. It creates `/var/lib/tailscale` only when missing. It includes no authentication state, credentials, logs, or local configuration. The daemon starts after installation, but **installation does not join a tailnet**.
 
 For an upgrade, quit Tailscale Menu first. The preinstall script accepts the verified Big Sur plist and the known earlier plist layout with the verified daemon's implicit `utun` default and inherited `GODEBUG` setting. It rejects changed state or socket paths, extra environment settings, conflicting daemons, and unrelated files. It saves the previous binaries, plist, and menu app (if present) in a private root-owned directory under `/var/backups/tailscale-macos11-installer/`, stops that launchd job before Installer replaces the payload, then restarts it. The existing state file and identity are not overwritten. The package does not change DNS or routes directly. If it rejects a customized installation, use the advanced procedure below after reviewing its paths.
 
@@ -43,18 +43,21 @@ sudo launchctl print system/com.tailscale.tailscaled
 
 Open `/Applications/TailscaleMenu.app` yourself. To start it at future logins, add it in **System Preferences → Users & Groups → Login Items**. The installer does not alter a user's login items: Big Sur's supported login-item API applies to the current user session and this app has no bundled login-item helper.
 
-### Build the package from verified release assets
+### Build the 1.104.7 package
 
-On a newer Mac with Xcode Command Line Tools, place the two files from the [verified release](https://github.com/dankhan/tailscale-legacy-macos/releases/tag/big-sur-v1.104.4-verified) in one directory: `tailscale-macos11-x86_64-v1.104.4.tar.gz` and `TailscaleMenu-macos11-x86_64-v1.104.4.zip`. The build script checks both archive SHA-256 values and the exact CLI, daemon, and GUI executable SHA-256 values before packaging.
+On the build Mac, archive the 1.104.7 binaries and menu app after the checks above. The package builder checks exact archive and executable SHA-256 values before packaging. For the upgrade fixture, obtain `tailscale-macos11-x86_64-v1.104.4.tar.gz` from the [verified release](https://github.com/dankhan/tailscale-legacy-macos/releases/tag/big-sur-v1.104.4-verified) and confirm its SHA-256 is `819f4107884e12176c44f9e49a959f3ee4d52761d7c6bbbc64cf7ddfdde8a0d1`.
 
 ```sh
-./installer/build-macos11-pkg.sh /path/to/release-assets dist
-shasum -a 256 dist/Tailscale-1.104.4-macOS11-Intel.pkg
-pkgutil --payload-files dist/Tailscale-1.104.4-macOS11-Intel.pkg
-python3 test/macos11-pkg/test_installer.py /path/to/release-assets
+mkdir -p dist/candidate-assets
+COPYFILE_DISABLE=1 tar -czf dist/candidate-assets/tailscale-macos11-x86_64-v1.104.7.tar.gz -C out-macos11 tailscale tailscaled
+ditto -c -k --sequesterRsrc --keepParent out/TailscaleMenu.app dist/candidate-assets/TailscaleMenu-macos11-x86_64-v1.104.7.zip
+./installer/build-macos11-pkg.sh dist/candidate-assets dist
+shasum -a 256 dist/Tailscale-1.104.7-macOS11-Intel.pkg
+pkgutil --payload-files dist/Tailscale-1.104.7-macOS11-Intel.pkg
+python3 test/macos11-pkg/test_installer.py dist/candidate-assets dist/verified-1.104.4/tailscale-macos11-x86_64-v1.104.4.tar.gz
 ```
 
-The generated package is ignored by Git. The inherited macOS 10 package builder is separate.
+Generated packages are ignored by Git. Only the published package with SHA-256 `f01270d6183caa2cdee82f8af0ed67c43336d7a54743e25b793aa0a139b4b213` is the verified 1.104.7 release. The verified 1.104.4 package remains available for rollback. The inherited macOS 10 package builder is separate.
 
 ## Advanced: Manual installation
 
